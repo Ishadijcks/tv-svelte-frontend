@@ -1,5 +1,7 @@
 <script lang="ts">
 	import type { Cursor } from '$lib/Cursor';
+	import { flip } from 'svelte/animate';
+	import { onMount } from 'svelte';
 
 	let cursors: Cursor[] = [];
 
@@ -36,52 +38,63 @@
 		if (!cursor) {
 			return;
 		}
-		cursor.y = y;
 		cursor.isPressed = isPressed;
 		cursors = cursors;
 	};
 
-	const socket = new WebSocket('ws://192.168.0.137:8000/ws');
+	let socket: WebSocket;
+	onMount(() => {
+		socket = new WebSocket('ws://192.168.202.8:8000/ws');
+		socket.addEventListener('message', (event) => {
+			const data = JSON.parse(event.data);
+			console.log('Message from server ', data);
+			const key = Object.keys(data)[0];
+			const value = Object.values(data)[0];
+			switch (key) {
+				case 'InitialState':
+					setInitialState(value);
+					break;
+				case 'ClientConnect':
+					addCursor(value.id);
+					break;
+				case 'CursorPress':
+					pressCursor(value.id, value.y, true);
+					break;
+				case 'CursorRelease':
+					pressCursor(value.id, value.y, false);
+					break;
+				case 'ClientDisconnect':
+					removeCursor(value.id);
+					break;
+				case 'CursorMove':
+					moveCursor(value.id, value.y);
+					break;
+			}
 
-	// Listen for messages
-	socket.addEventListener('message', (event) => {
-		const data = JSON.parse(event.data);
-		console.log('Message from server ', data);
-		const key = Object.keys(data)[0];
-		const value = Object.values(data)[0];
-		switch (key) {
-			case 'InitialState':
-				setInitialState(value);
-				break;
-			case 'ClientConnect':
-				addCursor(value.id);
-				break;
-			case 'CursorPress':
-				pressCursor(value.id, value.y, true);
-				break;
-			case 'CursorRelease':
-				pressCursor(value.id, value.y, false);
-				break;
-			case 'ClientDisconnect':
-				removeCursor(value.id);
-				break;
-			case 'CursorMove':
-				moveCursor(value.id, value.y);
-				break;
-		}
-
-		cursors = cursors;
+			cursors = cursors;
+		});
 	});
 
+	// Listen for messages
+
+	let lastSend = new Date();
+
 	const onMouseMove = (e) => {
+		const now = new Date();
+
+		const delta = now.getTime() - lastSend.getTime();
+		if (delta < 20) {
+			return;
+		}
+
+		lastSend = now;
+
 		const normalized = e.clientY / window.innerHeight;
 
-		console.log('sending', normalized);
 		socket.send(JSON.stringify({ type: 'CursorMove', id: ourId, y: normalized }));
 	};
 
 	const onMousePress = () => {
-		console.log('press');
 		socket.send(
 			JSON.stringify(
 				// TODO(@Isha): asd
@@ -100,17 +113,21 @@
 </script>
 
 <div class="h-screen flex flex-col border border-black p-2">
-	{JSON.stringify(cursors)}
-	<span>Our id: {ourId}</span>
+	<div class="flex flex-row justify-between">
+		<span class="">Your id: {ourId}</span>
+		<span>{cursors.length} players online</span>
+	</div>
 	<div
-		class="h-full w-full border border-black"
+		class="h-full w-full border border-black p-2 overflow-y-auto"
 		on:mousemove={onMouseMove}
 		on:mousedown={onMousePress}
 		on:mouseup={onMouseRelease}
 	>
-		<div class="flex flex-col space-y-4">
-			{#each cursors as cursor}
-				<span>{cursor.id}: {cursor.y} - {cursor.isPressed}</span>
+		<div class="flex flex-col space-y-4 h-full">
+			{#each cursors as cursor, index (cursor)}
+				<span class="absolute" animate:flip={{ duration: 100 }} style="top: {800 * cursor.y}px"
+					>{cursor.id}: {cursor.y} - {cursor.isPressed}</span
+				>
 			{/each}
 		</div>
 	</div>
